@@ -1,5 +1,7 @@
-# `@solana/wallet-adapter-solong`
+# `@solana/wallet-adapter-coin98`
 
 <!-- @TODO -->
 
 Coming soon.
+
+
