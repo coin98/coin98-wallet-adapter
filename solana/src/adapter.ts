@@ -1,27 +1,38 @@
 import {
-    BaseSignerWalletAdapter,
+    BaseMessageSignerWalletAdapter,
     pollUntilReady,
     WalletAccountError,
-    WalletError,
     WalletNotConnectedError,
     WalletNotFoundError,
     WalletNotInstalledError,
     WalletPublicKeyError,
     WalletSignTransactionError,
+    EventEmitter
 } from '@solana/wallet-adapter-base';
 import { PublicKey, Transaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 
-interface Coin98Wallet {
+type SIGN_REQUEST = {
+    signature: string;
+    publicKey: string;
+}
+
+type SIGN_MESSAGE = {
+    address: string,
+    msg: string,
+    sig: string
+}
+
+type ResponseType = SIGN_REQUEST & SIGN_MESSAGE
+
+interface Coin98Wallet extends EventEmitter {
     isCoin98?: boolean;
     signTransaction(transaction: Transaction): Promise<Transaction>;
     isConnected(): boolean;
     connect(): Promise<string[]>;
     disconnect(): Promise<void>;
-    request(params: { method: string; params: string | string[] | unknown }): Promise<{
-        signature: string;
-        publicKey: string;
-    }>;
+    signMessage(message: string): Promise<{ signature: Uint8Array }>;
+    request(params: { method: string; params: string | string[] | unknown }): Promise<ResponseType>;
 }
 
 interface Coin98Window extends Window {
@@ -37,7 +48,7 @@ export interface Coin98WalletAdapterConfig {
     pollCount?: number;
 }
 
-export class Coin98WalletAdapter extends BaseSignerWalletAdapter {
+export class Coin98WalletAdapter extends BaseMessageSignerWalletAdapter {
     private _connecting: boolean;
     private _wallet: Coin98Wallet | null;
     private _publicKey: PublicKey | null;
@@ -103,12 +114,15 @@ export class Coin98WalletAdapter extends BaseSignerWalletAdapter {
     }
 
     async disconnect(): Promise<void> {
-        if (this._wallet) {
-            this._wallet.disconnect();
+        const wallet = this._wallet;
+        if (wallet) {
             this._wallet = null;
             this._publicKey = null;
-            this.emit('disconnect');
+
+            await wallet.disconnect();
         }
+
+        this.emit('disconnect');
     }
 
     async signTransaction(transaction: Transaction): Promise<Transaction> {
@@ -143,6 +157,27 @@ export class Coin98WalletAdapter extends BaseSignerWalletAdapter {
             await this.sleep()
         }
         return signedTransactions;
+    }
+
+
+    async signMessage(message: Uint8Array): Promise<Uint8Array> {
+        try {
+            const wallet = this._wallet;
+            if (!wallet) throw new WalletNotConnectedError();
+
+            try {
+                //Pre process to text
+                const decodedMessage = new TextDecoder("utf-8").decode(message)
+                const {sig: signature} =  await wallet.request({ method: 'sol_sign', params: [decodedMessage] });
+
+                return new TextEncoder().encode(signature)
+            } catch (error: any) {
+                throw new WalletSignTransactionError(error?.message, error);
+            }
+        } catch (error: any) {
+            this.emit('error', error);
+            throw error;
+        }
     }
 
 
